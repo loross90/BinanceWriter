@@ -84,8 +84,8 @@ def read_tree(root_file_name, tree_name):
         orderbook[side_map[orderbook_side[0]]][orderbook_price[0]] = orderbook_volume[0]
 
         # print("0.0078125", orderbook_price[0]/0.0078125, type(orderbook_price[0]))
-
-    print("min", min_diff)
+    print(orderbook)
+    #print("min", min_diff)
 
 
 
@@ -123,54 +123,73 @@ def read_tree(root_file_name, tree_name):
     #     orderbook_updates_tree.Refresh()
 
 
+    updates_index = orderbook_updates_tree.GetEntryNumberWithBestIndex(current_orderbook_time, 0) # текущий номер записи в дереве обновлений ордербука
+    orderbook_updates_tree.GetEntry(updates_index)
+    while timestamp[0] == current_orderbook_time:
+        updates_index -= 1
+        orderbook_updates_tree.GetEntry(updates_index)
+    updates_index += 1
 
-
-
-    while True and False:
+    while True:
         try:
             # current_entry = orderbook_updates_tree.GetEntries()
             current_time = int(time.time())
-
             # print('current_entry', current_orderbook_time, current_time)
-            while current_orderbook_time < current_time:
-
+            while updates_index + 1 < orderbook_updates_tree.GetEntries():
                 # print('current_orderbook_time', current_orderbook_time)
 
-                # разместить ордер в аске
-                read_bytes = orderbook_updates_tree.GetEntryWithIndex(current_orderbook_time, 0)
+                read_bytes = orderbook_updates_tree.GetEntry(updates_index)
+
                 if read_bytes == 14:
-                    # if price[0] in orderbook['ask']:
-                    #     print("hurayyyy")
-                    # else:
-                    #     print("hui")
-                    orderbook['ask'][price[0]] = volume[0]
-                    print(tree_name, 'placed ask', current_time - timestamp[0], price[0], volume[0], timestamp[0],
-                          index[0], read_bytes, current_orderbook_time)
 
-                # отменить ордер в аске
-                read_bytes = orderbook_updates_tree.GetEntryWithIndex(current_orderbook_time, 1)
-                if read_bytes == 14:
-                    orderbook['ask'][price[0]] = 0
-                    print(tree_name, 'canceled ask', current_time - timestamp[0], price[0], volume[0], timestamp[0],
-                          index[0], read_bytes, current_orderbook_time)
+                    if index[0] < 4:
+                        printCounter = 0
 
-                # разместить ордер в биде
-                read_bytes = orderbook_updates_tree.GetEntryWithIndex(current_orderbook_time, 2)
-                if read_bytes == 14:
-                    orderbook['bid'][price[0]] = volume[0]
-                    print(tree_name, 'placed bid', current_time - timestamp[0], price[0], volume[0], timestamp[0],
-                          index[0], read_bytes, current_orderbook_time)
+                        # разместить ордер в аске
+                        if index[0] == 0:
+                            # if price[0] in orderbook['ask']:
+                            #     print("hurayyyy")
+                            # else:
+                            #     print("hui")
+                            orderbook['ask'][price[0]] = volume[0]
+                            print(tree_name, 'placed ask', current_time - timestamp[0], price[0], volume[0], timestamp[0],
+                                  index[0], read_bytes, current_orderbook_time)
 
-                # отменить ордер в биде
-                read_bytes = orderbook_updates_tree.GetEntryWithIndex(current_orderbook_time, 3)
-                if read_bytes == 14:
-                    orderbook['bid'][price[0]] = 0
-                    print(tree_name, 'canceled bid', current_time - timestamp[0], price[0], volume[0], timestamp[0],
-                          index[0], read_bytes, current_orderbook_time)
+                        # отменить ордер в аске
+                        #read_bytes = orderbook_updates_tree.GetEntryWithIndex(current_orderbook_time, 1)
+                        if index[0] == 1:
+                            orderbook['ask'][price[0]] = 0
+                            del orderbook['ask'][price[0]]
+                            print(tree_name, 'canceled ask', current_time - timestamp[0], price[0], volume[0], timestamp[0],
+                                  index[0], read_bytes, current_orderbook_time)
 
-                current_orderbook_time += 1
+                        # разместить ордер в биде
+                        #read_bytes = orderbook_updates_tree.GetEntryWithIndex(current_orderbook_time, 2)
+                        if index[0] == 2:
+                            orderbook['bid'][price[0]] = volume[0]
+                            print(tree_name, 'placed bid', current_time - timestamp[0], price[0], volume[0], timestamp[0],
+                                  index[0], read_bytes, current_orderbook_time)
 
-                # print("left ", current_time - current_orderbook_time)
+                        # отменить ордер в биде
+                        #read_bytes = orderbook_updates_tree.GetEntryWithIndex(current_orderbook_time, 3)
+                        if index[0] == 3:
+                            orderbook['bid'][price[0]] = 0
+                            del orderbook['bid'][price[0]]
+                            print(tree_name, 'canceled bid', current_time - timestamp[0], price[0], volume[0], timestamp[0],
+                                  index[0], read_bytes, current_orderbook_time)
+
+                    current_orderbook_time = timestamp[0]
+
+                updates_index += 1
+
+            # Если больше ничего не читается (якобы синхронизировался стакан) - пишем цену в стакане
+            if printCounter == 0:
+                printCounter += 1
+                min_ask = min(orderbook['ask'].items(), key=lambda x: float(x[0]))
+                max_bid = max(orderbook['bid'].items(), key=lambda x: float(x[0]))
+                print('sync1', current_orderbook_time, (float(min_ask[0]) + float(max_bid[0])) / 2.)
+
+            # print("left ", current_time - current_orderbook_time)
 
             orderbook_updates_tree.Refresh()
             orderbook_updates_tree.BuildIndex("Timestamp", "Index")

@@ -1,3 +1,4 @@
+import decimal
 import multiprocessing
 import random
 import time
@@ -16,11 +17,11 @@ import copy
 import array
 import numpy as np
 import httpx
+import ssl
 import os
 from os import getpid
-from ROOT import TObject, TFile, TTree
+from ROOT import TObject, TFile, TTree, AddressOf
 import pickle
-
 
 def get_obj(path_to_file):
     with open(path_to_file, 'rb') as f:
@@ -178,7 +179,7 @@ class WSClient():
                     self.trees[tree_name].Branch('Price', self.events[tree_name]['price'], 'price/d')
                     self.trees[tree_name].Branch('Volume', self.events[tree_name]['volume'], 'volume/d')
                     self.trees[tree_name].Branch('Index', self.events[tree_name]['index'], 'index/s')
-                    self.trees[tree_name].Write()
+                    #self.trees[tree_name].Write()
                 else:
                     self.trees[tree_name].SetBranchAddress('Timestamp', self.events[tree_name]['timestamp'])
                     self.trees[tree_name].SetBranchAddress('Price', self.events[tree_name]['price'])
@@ -214,12 +215,11 @@ class WSClient():
                         has_branch = True
                         break
                 if not has_branch:
-                    self.trees[tree_name].Branch('Timestamp', self.orderbooks_events[symbol]['timestamp'],
-                                                 'timestamp/i')
+                    self.trees[tree_name].Branch('Timestamp', self.orderbooks_events[symbol]['timestamp'], 'timestamp/i')
                     self.trees[tree_name].Branch('Price', self.orderbooks_events[symbol]['price'], 'price/d')
                     self.trees[tree_name].Branch('Volume', self.orderbooks_events[symbol]['volume'], 'volume/d')
                     self.trees[tree_name].Branch('Side', self.orderbooks_events[symbol]['side'], 'side/O')
-                    self.trees[tree_name].Write()
+                    #self.trees[tree_name].Write()
 
                 else:
                     self.trees[tree_name].SetBranchAddress('Timestamp', self.orderbooks_events[symbol]['timestamp'])
@@ -232,6 +232,7 @@ class WSClient():
 
     def apply_orderbook_diff(self, market_data):
         symbol = market_data['s']
+        timestamp = int(market_data['E'] / 1000)
         for side in ["ask", "bid"]:
             for ev in market_data[side[:1]]:
                 if float(ev[1]):
@@ -249,14 +250,12 @@ class WSClient():
         min_ask = min(self.orderbooks[symbol]['ask'].items(), key=lambda x: float(x[0]))
         max_bid = max(self.orderbooks[symbol]['bid'].items(), key=lambda x: float(x[0]))
 
-
-        if int(time.time()) % 10 == 0 or True:
+        if True or int(time.time()) % 1 == 0:
             self.lock.acquire()
 
             if int(self.lock_time.value - time.time()) < -5*self.block_time:
                 pass
                 #TODO написать логику получения несинхронизированных пар и спросить стаканы
-
 
             try:
                 sync = 0
@@ -267,43 +266,54 @@ class WSClient():
                 for el in self.requests_list:
                     req += el
 
-
-                print('sync1', sync, '/', self.total_symbol_num, 'req', req, round(time.time() - global_time, 1),
+                # timestamp = int(market_data["E"] / 1000)
+                # for side in ["ask", "bid"]:
+                #     for order in market_data[side[:1]]:
+                #         quantity = float(order[1])
+                #         price = float(order[0])
+                with open("write_price.txt", "a") as fw:
+                    fw.write(str(self.record_event_number) + " " + str(round((float(min_ask[0])+float(max_bid[0]))/2., 2)) + "\n")
+                print('sync1', sync, '/', self.total_symbol_num, 'req', req, 'EvNum', self.record_event_number, round(time.time() - global_time, 1),
                       int(self.lock_time.value - time.time()), (float(min_ask[0])+float(max_bid[0]))/2.)
             finally:
                 self.lock.release()
 
     def write_event(self, tree_name, timestamp, price, quantity, index):
 
-        self.events[tree_name]['timestamp'][0] = timestamp
         self.events[tree_name]['price'][0] = price
         self.events[tree_name]['volume'][0] = quantity
+        self.events[tree_name]['timestamp'][0] = timestamp
         self.events[tree_name]['index'][0] = int(index, 2)
         self.trees[tree_name].Fill()
         is_orderbook = tree_name.rfind('_orderbook') > 0
-
 
         # write_frequency = self.orderbook_depth if not is_orderbook else self.number_of_records_in_event
         # print('tree_name', tree_name, write_frequency, is_orderbook)
         if self.trees[tree_name].GetEntries() == self.record_event_number:
             # print('999999999999',self.record_event_number)
             try:
+                sync = 0
+                for el in self.sync_list:
+                    sync += el
                 root_filename = self.market_name + '/' + tree_name + '.root'
                 rf = TFile(root_filename, 'update')
                 if rf.IsOpen and not rf.IsZombie():
                     # self.trees[tree_name].Write("", TObject.kOverwrite)
                     self.trees[tree_name].Write()
                     self.trees[tree_name].AutoSave('SaveSelf')
-                    rf.Close()
+                rf.Close()
                     # time.sleep(1)
             except Exception as e:
                 print("Event in", tree_name, "can't be written", e)
-            # print(tree_name, price, quantity, timestamp, index)
+
+            # print(self.eventType, 'sync1', sync, '/', self.total_symbol_num, price, self.record_event_number, round(time.time() - global_time, 1),
+            #       quantity)
 
     def write_events(self, data):
 
         tree_name = data["s"]
         event_type = data["e"]
+        self.eventType = event_type
         index_prefix = "00000"
         if event_type == "trade":
             self.record_event_number = self.trees[tree_name].GetEntries() + 1
@@ -321,8 +331,6 @@ class WSClient():
             #TODO update orderbook
 
             # update_orderbook_trades
-
-
             self.write_event(tree_name, timestamp, price, quantity, index)
 
         elif event_type == "depthUpdate":
@@ -529,7 +537,7 @@ class WSClient():
                 print("self.get_request()", requests)
 
                 # async with websockets.unix_connect(requests) as ws:
-                async with websockets.connect(requests, ping_interval=None) as ws:
+                async with websockets.connect(requests, ping_interval=None, ssl=ssl.SSLContext(ssl.CERT_REQUIRED)) as ws:
 
                     while True:
                         # listener loop
@@ -600,6 +608,8 @@ class WSClient():
                 logger.debug('Retrying connection in {} sec (Ctrl-C to quit)'.format(self.sleep_time))
                 await asyncio.sleep(self.sleep_time)
                 continue
+            except Exception as e:
+                print(e.__context__)
 
 
 logger = logging.getLogger(__name__)
