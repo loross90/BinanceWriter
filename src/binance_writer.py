@@ -4,6 +4,7 @@ import random
 import time
 from datetime import datetime
 import asyncio
+import numpy
 import websockets
 import requests
 import json
@@ -73,6 +74,9 @@ class WSClient():
         self.orderbooks_events = {}
         self.orderbook_response = {}
         self.trees = {}
+        self.delayWatcher = list()
+        with open("delayWatcher.txt", 'w') as f:
+            f.flush()
 
         self.url = kwargs.get('url')
         self.sync_list = kwargs.get('sync_list')
@@ -244,7 +248,7 @@ class WSClient():
                                              sorted(self.orderbooks[symbol][side], key=lambda x: float(x),
                                                     reverse=side == 'bid')}
 
-        if symbol != 'BTCUSDT':
+        if symbol not in ['BTCUSDT', 'ETHBTC']:
             return
 
         min_ask = min(self.orderbooks[symbol]['ask'].items(), key=lambda x: float(x[0]))
@@ -273,7 +277,7 @@ class WSClient():
                 #         price = float(order[0])
                 with open("write_price.txt", "a") as fw:
                     fw.write(str(self.record_event_number) + " " + str(round((float(min_ask[0])+float(max_bid[0]))/2., 2)) + "\n")
-                print('sync1', sync, '/', self.total_symbol_num, 'req', req, 'EvNum', self.record_event_number, round(time.time() - global_time, 1),
+                print('sync1', sync, '/', self.total_symbol_num, 'req', req, symbol, 'EvNum', self.record_event_number, round(time.time() - global_time, 1),
                       int(self.lock_time.value - time.time()), (float(min_ask[0])+float(max_bid[0]))/2.)
             finally:
                 self.lock.release()
@@ -302,9 +306,14 @@ class WSClient():
                     self.trees[tree_name].Write()
                     self.trees[tree_name].AutoSave('SaveSelf')
                 rf.Close()
+                self.delayWatcher.insert(0, self.record_event_number)
+                self.delayWatcher.append(int(time.time_ns()/1000000))
                     # time.sleep(1)
             except Exception as e:
                 print("Event in", tree_name, "can't be written", e)
+
+            with open("delayWatcher.txt", 'a') as f:
+                f.write('|'.join(str(elem) for elem in self.delayWatcher) + '\n')
 
             # print(self.eventType, 'sync1', sync, '/', self.total_symbol_num, price, self.record_event_number, round(time.time() - global_time, 1),
             #       quantity)
@@ -568,6 +577,7 @@ class WSClient():
                             if data is None:
                                 continue
 
+                            self.delayWatcher = [data["e"], data["T"] if data["e"] == "trade" else data["E"], int(time.time_ns()/1000000)]
                             if self.thread_to_index is None and len(self.thread_list) == len(self.sync_list):
                                 self.thread_to_index = {self.thread_list[ix]: ix for ix in range(len(self.thread_list))}
                                 self.index_to_thread = {ix: self.thread_list[ix] for ix in range(len(self.thread_list))}
@@ -727,7 +737,7 @@ if __name__ == '__main__':
     logging.info(
         "I am the parent, with PID {}".format(getpid()))
     # binance_symbols = get_binance_symbols('symbols.pkl')  # [:40]
-    binance_symbols = ['BTCUSDT']
+    binance_symbols = ['BTCUSDT', 'ETHBTC']
     # # binance_symbols = binance_symbols#[:10]
     print(binance_symbols, len(binance_symbols))
     #

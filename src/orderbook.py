@@ -1,19 +1,18 @@
 import argparse
-
 from ROOT import TObject, TFile, TTree, AddressOf
 import array
 import random
 import time
 import os
 import numpy as np
-
-os.environ["OMP_NUM_THREADS"] = "1"
 import multiprocessing
-
+os.environ["OMP_NUM_THREADS"] = "1"
 
 def read_tree(root_file_name, tree_name):
     rf = TFile(root_file_name, 'read')
 
+    with open("delayReader.txt", "w") as f:
+        f.flush()
 
     orderbook_price = array.array('d', [0])
     orderbook_volume = array.array('d', [0])
@@ -34,15 +33,11 @@ def read_tree(root_file_name, tree_name):
 
     current_orderbook_time = orderbook_timestamp[0]
 
-
     price = array.array('d', [0])
     volume = array.array('d', [0])
     timestamp = array.array('i', [0])
     index = array.array('i', [0])
     orderbook_updates_tree = rf.Get(tree_name)
-
-
-
 
     orderbook_updates_tree.SetBranchAddress("Timestamp", timestamp)
     orderbook_updates_tree.SetBranchAddress("Price", price)
@@ -50,8 +45,6 @@ def read_tree(root_file_name, tree_name):
     orderbook_updates_tree.SetBranchAddress("Index", index)
 
     orderbook_updates_tree.BuildIndex("Timestamp", "Index")
-
-
 
     ind = 0
     orderbook = {"ask": {}, "bid": {}, "timestamp": current_orderbook_time}
@@ -86,12 +79,6 @@ def read_tree(root_file_name, tree_name):
         # print("0.0078125", orderbook_price[0]/0.0078125, type(orderbook_price[0]))
     print(orderbook)
     #print("min", min_diff)
-
-
-
-
-
-
     # print(orderbook)
     # last_entry = None
     # print("here")
@@ -140,6 +127,9 @@ def read_tree(root_file_name, tree_name):
 
                 read_bytes = orderbook_updates_tree.GetEntry(updates_index)
 
+                with open("delayReader.txt", "a") as f:
+                    f.write(str(updates_index) + "|" + str(int(time.time_ns()/1000000)) + "\n")
+
                 if read_bytes == 14:
 
                     if index[0] < 4:
@@ -187,7 +177,7 @@ def read_tree(root_file_name, tree_name):
                 printCounter += 1
                 min_ask = min(orderbook['ask'].items(), key=lambda x: float(x[0]))
                 max_bid = max(orderbook['bid'].items(), key=lambda x: float(x[0]))
-                print('sync1', current_orderbook_time, (float(min_ask[0]) + float(max_bid[0])) / 2.)
+                print('sync1', tree_name, (float(min_ask[0]) + float(max_bid[0])) / 2.) #current_orderbook_time - тоже писать надо потом
 
             # print("left ", current_time - current_orderbook_time)
 
@@ -268,7 +258,6 @@ def read_tree(root_file_name, tree_name):
     #     last_entry = current_entry
     #     rf.Get(tree_name).Refresh()
 
-
 index_dict = {
     "type": {"order": "0",
              "trade": "1"},
@@ -289,9 +278,6 @@ def get_tree_name(filename):
     print(symbols)
     return symbols
 
-
-
-
 def get_arguments():
     parser = argparse.ArgumentParser()
 
@@ -310,13 +296,27 @@ def get_arguments():
                         help='symbol')
     return parser.parse_args()
 
-
-
 if __name__ == '__main__':
-
+    multiprocessing.set_start_method('spawn')
+    params = []
     start = time.time()
     args = get_arguments()
-    root_filename = args.market + '/' + args.symbol + '.root'
+    # root_filename = args.market + '/' + args.symbol + '.root'
+    # tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')]
+    #read_tree(root_filename, tree_name)
 
-    tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')]
-    read_tree(root_filename, tree_name)
+    args.symbol = ['BTCUSDT', 'ETHBTC']
+
+    with multiprocessing.Pool(len(args.symbol)) as pool:
+        try:
+            for pairName in args.symbol:
+                root_filename = args.market + '/' + pairName + '.root'
+                tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')]
+                pool.apply_async(read_tree, args=(root_filename, tree_name))
+            pool.close()
+            pool.join()
+
+        except KeyboardInterrupt:
+            print("Caught KeyboardInterrupt, terminating workers")
+            pool.terminate()
+            pool.join()
