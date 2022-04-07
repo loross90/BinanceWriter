@@ -178,7 +178,7 @@ def read_tree(root_file_name, tree_name):
                 min_ask = min(orderbook['ask'].items(), key=lambda x: float(x[0]))
                 max_bid = max(orderbook['bid'].items(), key=lambda x: float(x[0]))
                 print('sync1', tree_name, (float(min_ask[0]) + float(max_bid[0])) / 2.) #current_orderbook_time - тоже писать надо потом
-
+                print('Change ' + str(get_available_volume('ask', orderbook, 100000)) + ' ' + tree_name + ' 100000!')
             # print("left ", current_time - current_orderbook_time)
 
             orderbook_updates_tree.Refresh()
@@ -296,6 +296,26 @@ def get_arguments():
                         help='symbol')
     return parser.parse_args()
 
+def get_available_volume(side, orderbook, price):
+    volume = 0
+    if side == 'ask':
+        sorted_side = sorted(orderbook['ask'], reverse=False)
+    if side == 'bid':
+        sorted_side = sorted(orderbook['bid'], reverse=True)
+
+    for i in sorted_side:
+        if orderbook[side][i] * i >= price:
+            volume += price / i
+            price = 0
+            break
+        volume += orderbook[side][i]
+        price -= orderbook[side][i] * i
+    if price > 0:
+        raise ValueError("There is not enough amount to " + side)
+    return volume
+
+    0
+
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
     params = []
@@ -305,7 +325,7 @@ if __name__ == '__main__':
     # tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')]
     #read_tree(root_filename, tree_name)
 
-    args.symbol = ['BTCUSDT', 'ETHBTC']
+    args.symbol = ['BTCUSDT']#['BTCUSDT', 'ETHBTC']
 
     with multiprocessing.Pool(len(args.symbol)) as pool:
         try:

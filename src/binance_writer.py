@@ -275,8 +275,8 @@ class WSClient():
                 #     for order in market_data[side[:1]]:
                 #         quantity = float(order[1])
                 #         price = float(order[0])
-                with open("write_price.txt", "a") as fw:
-                    fw.write(str(self.record_event_number) + " " + str(round((float(min_ask[0])+float(max_bid[0]))/2., 2)) + "\n")
+                # with open("write_price.txt", "a") as fw:
+                #     fw.write(str(self.record_event_number) + " " + str(round((float(min_ask[0])+float(max_bid[0]))/2., 2)) + "\n")
                 print('sync1', sync, '/', self.total_symbol_num, 'req', req, symbol, 'EvNum', self.record_event_number, round(time.time() - global_time, 1),
                       int(self.lock_time.value - time.time()), (float(min_ask[0])+float(max_bid[0]))/2.)
             finally:
