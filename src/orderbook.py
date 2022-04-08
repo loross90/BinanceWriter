@@ -6,12 +6,18 @@ import time
 import os
 import numpy as np
 import multiprocessing
+import asyncio
 os.environ["OMP_NUM_THREADS"] = "1"
 
-def read_tree(root_file_name, tree_name):
+class OrderbookClient():
+    def __init__(self, **kwargs):
+        0
+
+
+def read_tree(root_file_name, tree_name, orderbook):
     rf = TFile(root_file_name, 'read')
 
-    with open("delayReader.txt", "w") as f:
+    with open("delayReader_" + tree_name + ".txt", "w") as f:
         f.flush()
 
     orderbook_price = array.array('d', [0])
@@ -47,7 +53,8 @@ def read_tree(root_file_name, tree_name):
     orderbook_updates_tree.BuildIndex("Timestamp", "Index")
 
     ind = 0
-    orderbook = {"ask": {}, "bid": {}, "timestamp": current_orderbook_time}
+    # orderbook[tree_name] = {"ask": {}, "bid": {}, "timestamp": current_orderbook_time}
+    orderbook[tree_name]['timestamp'] = current_orderbook_time
     side_map = {0: "ask", 1: "bid"}
     prev_val = None
     curr_val = None
@@ -74,10 +81,10 @@ def read_tree(root_file_name, tree_name):
                 min_diff = np.minimum(min_diff, np.abs(curr_val - prev_val))
                 # print('2', curr_val, prev_val, abs(curr_val - prev_val), min_diff)
 
-        orderbook[side_map[orderbook_side[0]]][orderbook_price[0]] = orderbook_volume[0]
+        orderbook[tree_name][side_map[orderbook_side[0]]][orderbook_price[0]] = orderbook_volume[0]
 
         # print("0.0078125", orderbook_price[0]/0.0078125, type(orderbook_price[0]))
-    print(orderbook)
+    print(orderbook[tree_name])
     #print("min", min_diff)
     # print(orderbook)
     # last_entry = None
@@ -93,6 +100,7 @@ def read_tree(root_file_name, tree_name):
     #     pass
     #
     # print('action', action)
+
     orderbook_updates_tree.Print()
 
     # print(orderbook)
@@ -127,7 +135,7 @@ def read_tree(root_file_name, tree_name):
 
                 read_bytes = orderbook_updates_tree.GetEntry(updates_index)
 
-                with open("delayReader.txt", "a") as f:
+                with open("delayReader_" + tree_name + ".txt", "a") as f:
                     f.write(str(updates_index) + "|" + str(int(time.time_ns()/1000000)) + "\n")
 
                 if read_bytes == 14:
@@ -141,32 +149,32 @@ def read_tree(root_file_name, tree_name):
                             #     print("hurayyyy")
                             # else:
                             #     print("hui")
-                            orderbook['ask'][price[0]] = volume[0]
-                            print(tree_name, 'placed ask', current_time - timestamp[0], price[0], volume[0], timestamp[0],
-                                  index[0], read_bytes, current_orderbook_time)
+                            orderbook[tree_name]['ask'][price[0]] = volume[0]
+                            # print(tree_name, 'placed ask', current_time - timestamp[0], price[0], volume[0], timestamp[0],
+                            #       index[0], read_bytes, current_orderbook_time)
 
                         # отменить ордер в аске
                         #read_bytes = orderbook_updates_tree.GetEntryWithIndex(current_orderbook_time, 1)
                         if index[0] == 1:
-                            orderbook['ask'][price[0]] = 0
-                            del orderbook['ask'][price[0]]
-                            print(tree_name, 'canceled ask', current_time - timestamp[0], price[0], volume[0], timestamp[0],
-                                  index[0], read_bytes, current_orderbook_time)
+                            orderbook[tree_name]['ask'][price[0]] = 0
+                            del orderbook[tree_name]['ask'][price[0]]
+                            # print(tree_name, 'canceled ask', current_time - timestamp[0], price[0], volume[0], timestamp[0],
+                            #       index[0], read_bytes, current_orderbook_time)
 
                         # разместить ордер в биде
                         #read_bytes = orderbook_updates_tree.GetEntryWithIndex(current_orderbook_time, 2)
                         if index[0] == 2:
-                            orderbook['bid'][price[0]] = volume[0]
-                            print(tree_name, 'placed bid', current_time - timestamp[0], price[0], volume[0], timestamp[0],
-                                  index[0], read_bytes, current_orderbook_time)
+                            orderbook[tree_name]['bid'][price[0]] = volume[0]
+                            # print(tree_name, 'placed bid', current_time - timestamp[0], price[0], volume[0], timestamp[0],
+                            #       index[0], read_bytes, current_orderbook_time)
 
                         # отменить ордер в биде
                         #read_bytes = orderbook_updates_tree.GetEntryWithIndex(current_orderbook_time, 3)
                         if index[0] == 3:
-                            orderbook['bid'][price[0]] = 0
-                            del orderbook['bid'][price[0]]
-                            print(tree_name, 'canceled bid', current_time - timestamp[0], price[0], volume[0], timestamp[0],
-                                  index[0], read_bytes, current_orderbook_time)
+                            orderbook[tree_name]['bid'][price[0]] = 0
+                            del orderbook[tree_name]['bid'][price[0]]
+                            # print(tree_name, 'canceled bid', current_time - timestamp[0], price[0], volume[0], timestamp[0],
+                            #       index[0], read_bytes, current_orderbook_time)
 
                     current_orderbook_time = timestamp[0]
 
@@ -175,10 +183,10 @@ def read_tree(root_file_name, tree_name):
             # Если больше ничего не читается (якобы синхронизировался стакан) - пишем цену в стакане
             if printCounter == 0:
                 printCounter += 1
-                min_ask = min(orderbook['ask'].items(), key=lambda x: float(x[0]))
-                max_bid = max(orderbook['bid'].items(), key=lambda x: float(x[0]))
+                min_ask = min(orderbook[tree_name]['ask'].items(), key=lambda x: float(x[0]))
+                max_bid = max(orderbook[tree_name]['bid'].items(), key=lambda x: float(x[0]))
                 print('sync1', tree_name, (float(min_ask[0]) + float(max_bid[0])) / 2.) #current_orderbook_time - тоже писать надо потом
-                print('Change ' + str(get_available_volume('ask', orderbook, 100000)) + ' ' + tree_name + ' 100000!')
+                #print('Change ' + str(get_available_volume('ask', orderbook[tree_name], 100000)) + ' ' + tree_name + ' 100000!')
             # print("left ", current_time - current_orderbook_time)
 
             orderbook_updates_tree.Refresh()
@@ -258,15 +266,6 @@ def read_tree(root_file_name, tree_name):
     #     last_entry = current_entry
     #     rf.Get(tree_name).Refresh()
 
-index_dict = {
-    "type": {"order": "0",
-             "trade": "1"},
-    "side": {"ask": "0",
-             "bid": "1"},
-    "action": {"place": "0",
-               "cancel": "1"}
-}
-
 def get_tree_name(filename):
     root_file = TFile(filename, 'read')
     symbols = []
@@ -288,51 +287,67 @@ def get_arguments():
                         type=str,
                         help='crypto market')
 
-    parser.add_argument('--symbol',
+    parser.add_argument('--symbols',
                         required=False,
-                        dest='symbol',
+                        dest='symbols',
                         default="BTCUSDT",
                         type=str,
-                        help='symbol')
+                        help='symbols array')
     return parser.parse_args()
 
-def get_available_volume(side, orderbook, price):
+def get_available_volume(side, ob, price):
     volume = 0
     if side == 'ask':
-        sorted_side = sorted(orderbook['ask'], reverse=False)
+        sorted_side = sorted(ob['ask'], reverse=False)
     if side == 'bid':
-        sorted_side = sorted(orderbook['bid'], reverse=True)
+        sorted_side = sorted(ob['bid'], reverse=True)
 
     for i in sorted_side:
-        if orderbook[side][i] * i >= price:
+        if ob[side][i] * i >= price:
             volume += price / i
             price = 0
             break
-        volume += orderbook[side][i]
-        price -= orderbook[side][i] * i
+        volume += ob[side][i]
+        price -= ob[side][i] * i
     if price > 0:
         raise ValueError("There is not enough amount to " + side)
     return volume
 
     0
 
+index_dict = {
+    "type": {"order": "0",
+             "trade": "1"},
+    "side": {"ask": "0",
+             "bid": "1"},
+    "action": {"place": "0",
+               "cancel": "1"}
+}
+
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
     params = []
     start = time.time()
     args = get_arguments()
+
     # root_filename = args.market + '/' + args.symbol + '.root'
     # tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')]
     #read_tree(root_filename, tree_name)
 
-    args.symbol = ['BTCUSDT']#['BTCUSDT', 'ETHBTC']
+    manager = multiprocessing.Manager()
+    ordbook = manager.dict()
 
-    with multiprocessing.Pool(len(args.symbol)) as pool:
+    args.symbols = ['BTCUSDT', 'ETHBTC'] #['BTCUSDT']
+
+    with multiprocessing.Pool(len(args.symbols)) as pool:
         try:
-            for pairName in args.symbol:
+            for pairName in args.symbols:
+                ordbook[pairName] = manager.dict()
+                ordbook[pairName]['ask'] = manager.dict()
+                ordbook[pairName]['bid'] = manager.dict()
                 root_filename = args.market + '/' + pairName + '.root'
-                tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')]
-                pool.apply_async(read_tree, args=(root_filename, tree_name))
+                tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')] # makes from 'binance/BTCUSDT.root' 'BTCUSDT'
+                pool.apply_async(read_tree, args=(root_filename, tree_name, ordbook))
             pool.close()
             pool.join()
 
