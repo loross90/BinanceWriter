@@ -141,7 +141,7 @@ class WSClient():
             self.orderbook_response[symbol] = {}
 
         self.autosave_number = 100 #100
-        # словарь содержит пару (синхронизирован(bool), время последнего обновления(int)) для каждой дорговой пары
+        # словарь содержит пару (синхронизирован(bool), время последнего обновления(int)) для каждой торговой пары
         self.sync_orderbooks = {self.symbols[idx]: (False, 0) for idx
                                 in range(len(self.symbols))}
 
@@ -248,8 +248,8 @@ class WSClient():
                                              sorted(self.orderbooks[symbol][side], key=lambda x: float(x),
                                                     reverse=side == 'bid')}
 
-        if symbol not in ['BTCUSDT', 'ETHBTC']:
-            return
+        # if symbol not in ['BTCUSDT', 'ETHBTC']:
+        #     return
 
         min_ask = min(self.orderbooks[symbol]['ask'].items(), key=lambda x: float(x[0]))
         max_bid = max(self.orderbooks[symbol]['bid'].items(), key=lambda x: float(x[0]))
@@ -679,6 +679,7 @@ def get_arguments():
                         default=['BTCUSDT'],
                         dest='symbols',
                         help='Symbol list')
+
     parser.add_argument('--num_of_threads', dest='num_of_threads', action="store", type=int, required=False, default=1,
                         help="Количество используемых тредов")
 
@@ -737,10 +738,11 @@ if __name__ == '__main__':
     logging.info(
         "I am the parent, with PID {}".format(getpid()))
     # binance_symbols = get_binance_symbols('symbols.pkl')  # [:40]
-    binance_symbols = ['BTCUSDT', 'ETHBTC']
-    # # binance_symbols = binance_symbols#[:10]
+    # binance_symbols = binance_symbols[:19]
+    binance_symbols = ['BTCUSDT', 'ETHBTC', 'ETHUSDT']
     print(binance_symbols, len(binance_symbols))
     #
+    # args.num_of_threads = len(binance_symbols)
     symbols_lists = np.array_split(binance_symbols, args.num_of_threads)
 
     for list in symbols_lists:

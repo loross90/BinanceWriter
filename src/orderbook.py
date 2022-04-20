@@ -10,12 +10,24 @@ import asyncio
 from shared_memory_dict import SharedMemoryDict
 from threading import Thread
 os.environ["OMP_NUM_THREADS"] = "1"
+import binance_writer
+import  PairsPrepairer
 
-def read_tree(root_file_name, tree_name, BTC_list, ETH_list):
+def read_tree(root_file_name, tree_name, all_dict, base_dict, lock):
         rf = TFile(root_file_name, 'read')
 
-        with open("delayReader_" + tree_name + ".txt", "w") as f:
-            f.flush()
+        # with open("delayReader_" + tree_name + ".txt", "w") as f:
+        #     f.flush()
+
+        # map_dict = {'USDT': 0, 'BTC': 1, 'ETH': 2}
+        #
+        # all_dict[map_dict[tree_name[0:3]]] = [0] * len(all_dict[0])
+
+        # if tree_name == 'BTCUSDT':
+        #     all_list[1] = [1,2,3,4,5]
+        #
+        # if tree_name == 'ETHBTC':
+        #     all_list[2] = [6,7,8,9,10]
 
         orderbook_price = array.array('d', [0])
         orderbook_volume = array.array('d', [0])
@@ -32,7 +44,6 @@ def read_tree(root_file_name, tree_name, BTC_list, ETH_list):
         current_orderbook_entry = orderbook_tree.GetEntries()
         orderbook_tree.GetEntry(current_orderbook_entry - 1)
         print(orderbook_tree_name, 'i', current_orderbook_entry, orderbook_price[0], orderbook_volume[0], orderbook_timestamp[0], orderbook_side[0])
-
 
         current_orderbook_time = orderbook_timestamp[0]
 
@@ -51,7 +62,8 @@ def read_tree(root_file_name, tree_name, BTC_list, ETH_list):
 
         ind = 0
         orderbook = {}
-        USDT_list = [1.0, 10.0, 100.0, 1000.0, 10000.0]
+        # USDT_list = [1.0, 10.0, 100.0, 1000.0, 10000.0]
+        all_dict[tree_name] = {'ask': [(0, 0)] * len(all_dict['USDT']['ask']), 'bid': [(0, 0)] * len(all_dict['USDT']['bid'])}
         orderbook[tree_name] = {"ask": {}, "bid": {}, "timestamp": current_orderbook_time}
 
         side_map = {0: "ask", 1: "bid"}
@@ -133,8 +145,8 @@ def read_tree(root_file_name, tree_name, BTC_list, ETH_list):
 
                     read_bytes = orderbook_updates_tree.GetEntry(updates_index)
 
-                    with open("delayReader_" + tree_name + ".txt", "a") as f:
-                        f.write(str(updates_index) + "|" + str(int(time.time_ns()/1000000)) + "\n")
+                    # with open("delayReader_" + tree_name + ".txt", "a") as f:
+                    #     f.write(str(updates_index) + "|" + str(int(time.time_ns()/1000000)) + "\n")
 
                     if read_bytes == 14:
 
@@ -184,8 +196,19 @@ def read_tree(root_file_name, tree_name, BTC_list, ETH_list):
                     min_ask = min(orderbook[tree_name]['ask'].items(), key=lambda x: float(x[0]))
                     max_bid = max(orderbook[tree_name]['bid'].items(), key=lambda x: float(x[0]))
                     print('sync1', tree_name, (float(min_ask[0]) + float(max_bid[0])) / 2.) #current_orderbook_time - тоже писать надо потом
-                    fill_availables(tree_name, 'ask', orderbook[tree_name], locals()[tree_name[0:3] + '_list'], locals()[tree_name[3:] + '_list'])
-                    print(print(*locals()[tree_name[0:3] + '_list'], sep=', '))
+                    try:
+                        ask_list = fill_availables(orderbook[tree_name]['ask'], False, (i[0] for i in all_dict[base_dict]['ask'])) #False for ask and True for bid; it affects sort method for keys in orderbook
+                        bid_list = fill_availables(orderbook[tree_name]['bid'], True, (i[0] for i in all_dict[base_dict]['bid']))
+                        all_dict[tree_name] = {'ask': ask_list, 'bid': bid_list}
+                        print(tree_name + ' ask', all_dict[tree_name]['ask'], sep=', ', end='\n')
+                        str(all_dict[tree_name]['ask'])
+
+                    except Exception:
+                        pass
+                    # print('bid ', end='\n')
+                    # print(all_dict[base_dict]['bid'], sep=', ', end='\n')
+                    # fill_availables(tree_name, 'ask', orderbook[tree_name], locals()[tree_name[0:3] + '_list'], locals()[tree_name[3:] + '_list'])
+                    # print(print(*locals()[tree_name[0:3] + '_list'], sep=', '))
                 # print("left ", current_time - current_orderbook_time)
 
                 orderbook_updates_tree.Refresh()
@@ -294,29 +317,26 @@ def get_arguments():
                         help='symbols array')
     return parser.parse_args()
 
-def fill_availables(pair, side, ob, target_list, base_list):
-    i = 0
+def fill_availables(ob, reverse_sort, base_list):
+    target_list = []
+    sorted_prices = sorted(ob, reverse=reverse_sort)
     for price in base_list:
-        target_list[i] = get_available_volume(side, ob, price)
-        i += 1
+        target_list.append(get_available_volume(ob, sorted_prices, price))
+    return target_list
 
-def get_available_volume(side, ob, price):
+def get_available_volume(ob, sorted_prices, amount): # ob - orderbook; amount - available of qAsset;
     volume = 0
-    if side == 'ask':
-        sorted_side = sorted(ob['ask'], reverse=False)
-    if side == 'bid':
-        sorted_side = sorted(ob['bid'], reverse=True)
-
-    for i in sorted_side:
-        if ob[side][i] * i >= price:
-            volume += price / i
-            price = 0
+    init = amount
+    for i in sorted_prices:
+        if ob[i] * i >= amount:
+            volume += amount / i
+            amount = 0
             break
-        volume += ob[side][i]
-        price -= ob[side][i] * i
-    if price > 0:
-        raise ValueError("There is not enough amount to " + side)
-    return volume
+        volume += ob[i]
+        amount -= ob[i] * i
+    if amount > 0:
+        raise ValueError("There is not enough volume in orderbook!")
+    return (volume, init/volume if volume != 0 else 0)
 
 index_dict = {
     "type": {"order": "0",
@@ -333,26 +353,37 @@ if __name__ == '__main__':
     start = time.time()
     args = get_arguments()
 
+    PairsPrepairer.pairs_prepare('https://api3.binance.com/api/v3/exchangeInfo', 'pairs.pkl', True)
+    pairs = PairsPrepairer.get_obj('pairs.pkl')
+
     # root_filename = args.market + '/' + args.symbol + '.root'
     # tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')]
     #read_tree(root_filename, tree_name)
 
     manager = multiprocessing.Manager()
-    BTC_list = manager.list()
-    ETH_list = manager.list()
-
-    args.symbols = ['BTCUSDT', 'ETHBTC'] #['BTCUSDT']
+    lock = manager.Lock()
+    all_pair_dict = manager.dict()
+    all_pair_dict['USDT'] = {'ask': [(1, 0), (10, 0), (100, 0), (1000, 0), (10000, 0), (100000, 0)], 'bid': [(1, 0), (10, 0), (100, 0), (1000, 0), (10000, 0), (100000, 0)]}
+    # BTC_list = manager.list()
+    # ETH_list = manager.list()
+    args.symbols = ['BTCUSDT', 'ETHBTC', 'ETHUSDT'] #['BTCUSDT']
+    # args.symbols = binance_writer.get_binance_symbols('symbols.pkl')[:19]
 
     with multiprocessing.Pool(len(args.symbols)) as pool:
         try:
-            for i in range(5):
-                BTC_list.append(0)
-                ETH_list.append(0)
+            # for i in range(5):
+                # BTC_list.append(0)
+                # ETH_list.append(0)
 
             for pairName in args.symbols:
+                all_pair_dict[pairName] = {}
                 root_filename = args.market + '/' + pairName + '.root'
-                tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')] # makes from 'binance/BTCUSDT.root' 'BTCUSDT'
-                pool.apply_async(read_tree, args=(root_filename, tree_name, BTC_list, ETH_list))
+                tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')] # makes (for example) from 'binance/BTCUSDT.root' 'BTCUSDT'
+                if tree_name.endswith('USDT'):
+                    base_dict = 'USDT'
+                else:
+                    base_dict = pairs[tree_name]['path'][1]
+                pool.apply_async(read_tree, args=(root_filename, tree_name, all_pair_dict, base_dict, lock))
             pool.close()
             pool.join()
 
