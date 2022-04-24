@@ -41,21 +41,36 @@ def form_paths(interested):
         pathtousd[symbol[i]]['b'] = bAssets[i]
         pathtousd[symbol[i]]['q'] = qAssets[i]
         pathtousd[symbol[i]]['path'] = []
+        pathtousd[symbol[i]]['reversed'] = []
+        pathtousd[symbol[i]]['targetAsset'] = pathtousd[symbol[i]]['b']
 
         pathtousd[symbol[i]]['path'] += [symbol[i]]
-        if bAssets[i] == 'USDT' or qAssets[i] == 'USDT':
+        if symbol[i].__contains__('USDT'):
+            if symbol[i].startswith('USDT'):
+                pathtousd[symbol[i]]['reversed'] = [True]
+                pathtousd[symbol[i]]['targetAsset'] = pathtousd[symbol[i]]['q']
+            else:
+                pathtousd[symbol[i]]['reversed'] = [False]
+                pathtousd[symbol[i]]['targetAsset'] = pathtousd[symbol[i]]['b']
             continue
 
         path = g.get_shortest_paths(qAssets[i], to="USDT", mode=OUT, output='vpath')
+        if g.vs[path[0][1]]['name'] == bAssets[i]:
+            pathtousd[symbol[i]]['path'] = []
+            pathtousd[symbol[i]]['targetAsset'] = pathtousd[symbol[i]]['q']
+        else:
+            pathtousd[symbol[i]]['reversed'] = [False]
 
         for n in range(0, len(path[0]) - 1):
-            pair = str(g.vs[path[0][n]]['name'] + g.vs[path[0][n+1]]['name'])
+            pair = str(g.vs[path[0][n]]['name'] + g.vs[path[0][n + 1]]['name'])
             if pair in symbol:
                 pathtousd[symbol[i]]['path'] += [pair]
+                pathtousd[symbol[i]]['reversed'] += [False]
                 continue
             pair = str(g.vs[path[0][n + 1]]['name'] + g.vs[path[0][n]]['name'])
             if pair in symbol:
                 pathtousd[symbol[i]]['path'] += [pair]
+                pathtousd[symbol[i]]['reversed'] += [True]
                 continue
             raise ValueError("No such pair " + pair + " found!")
 
@@ -88,7 +103,8 @@ def get_args():
 
 if __name__ == '__main__':
     args = get_args()
-    pairs_prepare(args.link, "pairs.pkl", args.forceUpdate)
+    a = pairs_prepare(args.link, "pairs.pkl", args.forceUpdate)
+    print(json.dumps(a, indent=2, default=str))
 
 
 

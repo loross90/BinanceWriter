@@ -2,18 +2,16 @@ import argparse
 from ROOT import TObject, TFile, TTree, AddressOf
 import array
 import random
+import json
 import time
 import os
 import numpy as np
 import multiprocessing
-import asyncio
-from shared_memory_dict import SharedMemoryDict
-from threading import Thread
 os.environ["OMP_NUM_THREADS"] = "1"
-import binance_writer
-import  PairsPrepairer
+import PairsPrepairer
+from prettytable import PrettyTable
 
-def read_tree(root_file_name, tree_name, all_dict, base_dict, lock):
+def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dict, lock):
         rf = TFile(root_file_name, 'read')
 
         # with open("delayReader_" + tree_name + ".txt", "w") as f:
@@ -95,8 +93,8 @@ def read_tree(root_file_name, tree_name, all_dict, base_dict, lock):
             orderbook[tree_name][side_map[orderbook_side[0]]][orderbook_price[0]] = orderbook_volume[0]
 
             # print("0.0078125", orderbook_price[0]/0.0078125, type(orderbook_price[0]))
-        print(orderbook[tree_name])
-        #print("min", min_diff)
+        # print(orderbook[tree_name])
+        # print("min", min_diff)
         # print(orderbook)
         # last_entry = None
         # print("here")
@@ -193,23 +191,41 @@ def read_tree(root_file_name, tree_name, all_dict, base_dict, lock):
                 # Если больше ничего не читается (якобы синхронизировался стакан) - пишем цену в стакане
                 if printCounter == 0:
                     printCounter += 1
-                    min_ask = min(orderbook[tree_name]['ask'].items(), key=lambda x: float(x[0]))
-                    max_bid = max(orderbook[tree_name]['bid'].items(), key=lambda x: float(x[0]))
-                    print('sync1', tree_name, (float(min_ask[0]) + float(max_bid[0])) / 2.) #current_orderbook_time - тоже писать надо потом
-                    try:
-                        ask_list = fill_availables(orderbook[tree_name]['ask'], False, (i[0] for i in all_dict[base_dict]['ask'])) #False for ask and True for bid; it affects sort method for keys in orderbook
-                        bid_list = fill_availables(orderbook[tree_name]['bid'], True, (i[0] for i in all_dict[base_dict]['bid']))
-                        all_dict[tree_name] = {'ask': ask_list, 'bid': bid_list}
-                        print(tree_name + ' ask', all_dict[tree_name]['ask'], sep=', ', end='\n')
-                        str(all_dict[tree_name]['ask'])
+                    with lock:
+                        try:
+                            min_ask = min(orderbook[tree_name]['ask'].items(), key=lambda x: float(x[0]))
+                            max_bid = max(orderbook[tree_name]['bid'].items(), key=lambda x: float(x[0]))
+                            print('sync1', tree_name, (float(min_ask[0]) + float(max_bid[0])) / 2.) #current_orderbook_time - тоже писать надо потом
 
-                    except Exception:
-                        pass
-                    # print('bid ', end='\n')
-                    # print(all_dict[base_dict]['bid'], sep=', ', end='\n')
-                    # fill_availables(tree_name, 'ask', orderbook[tree_name], locals()[tree_name[0:3] + '_list'], locals()[tree_name[3:] + '_list'])
-                    # print(print(*locals()[tree_name[0:3] + '_list'], sep=', '))
-                # print("left ", current_time - current_orderbook_time)
+                            if not inverted_pair:
+                                ask_list = fill_availables(orderbook[tree_name]['ask'], False,
+                                                           (i[0] for i in all_dict[base_dict]['ask']), inverted_pair) #False for ask and True for bid; it affects sort method for keys in orderbook
+                                bid_list = fill_availables(orderbook[tree_name]['bid'], True,
+                                                           (i[0] for i in all_dict[base_dict]['bid']), inverted_pair)
+                            else:
+                                ask_list = fill_availables(orderbook[tree_name]['bid'], True,
+                                                           (i[0] for i in all_dict[base_dict]['bid']), inverted_pair)
+                                bid_list = fill_availables(orderbook[tree_name]['ask'], False,
+                                                           (i[0] for i in all_dict[base_dict]['ask']), inverted_pair)
+
+                            all_dict[tree_name] = {'ask': ask_list, 'bid': bid_list}
+
+                            print(json.dumps(all_dict[tree_name], indent=2, default=str))
+
+                            # print_orderbook(tree_name, orderbook[tree_name], 4) # IMPORTIANT THING
+
+                            # arb_table = PrettyTable(['USDT amount', 'ETHUSDT', 'ETHBTC -> BTCUSDT', 'diff'])
+                            # for i in range(len(all_dict['ETHUSDT']['ask'])):
+                            #     arb_table.add_row([all_dict['USDT']['ask'][i][0],
+                            #                       all_dict['ETHUSDT']['ask'][i][0],
+                            #                       all_dict['ETHBTC']['ask'][i][0],
+                            #                       abs(all_dict['ETHUSDT']['ask'][i][0] - all_dict['ETHBTC']['ask'][i][0])])
+                            # print(arb_table)
+
+                            # print_dollar_eqv_table(tree_name, all_dict['USDT'], all_dict[tree_name]) # IMPORTIANT THING
+
+                        except Exception:
+                            pass
 
                 orderbook_updates_tree.Refresh()
                 orderbook_updates_tree.BuildIndex("Timestamp", "Index")
@@ -288,6 +304,31 @@ def read_tree(root_file_name, tree_name, all_dict, base_dict, lock):
         #     last_entry = current_entry
         #     rf.Get(tree_name).Refresh()
 
+def print_orderbook(tree_name, ob, deepth):
+    table = PrettyTable(['Price', 'Volume'])
+    table.title = tree_name + ' orderbook'
+    for price in reversed(sorted(ob['ask'])[:deepth]):
+        table.add_row([price, ob['ask'][price]])
+    table.add_row(['-----'] * 2)
+    for price in sorted(ob['bid'], reverse=True)[:deepth]:
+        table.add_row([price, ob['bid'][price]])
+    print(table)
+
+def print_dollar_eqv_table(tree_name, dollar_dict, pair_dict):
+    pair_table = PrettyTable(['', '$ amount', 'volume', 'av. price'])
+    pair_table.title = tree_name
+    pair_table.add_row(['ask', '', '', ''])
+    for i in range(len(dollar_dict['ask'])):
+        pair_table.add_row(['', dollar_dict['ask'][i][0],
+                            pair_dict['ask'][i][0],
+                            pair_dict['ask'][i][1]])
+    pair_table.add_row(['bid', '', '', ''])
+    for i in range(len(dollar_dict['bid'])):
+        pair_table.add_row(['', dollar_dict['bid'][i][0],
+                            pair_dict['bid'][i][0],
+                            pair_dict['bid'][i][1]])
+    print(pair_table)
+
 def get_tree_name(filename):
     root_file = TFile(filename, 'read')
     symbols = []
@@ -317,25 +358,51 @@ def get_arguments():
                         help='symbols array')
     return parser.parse_args()
 
-def fill_availables(ob, reverse_sort, base_list):
+def fill_availables(ob, reverse_sort, base_list, inv_pair):
     target_list = []
     sorted_prices = sorted(ob, reverse=reverse_sort)
     for price in base_list:
-        target_list.append(get_available_volume(ob, sorted_prices, price))
+        if not inv_pair:
+            target_list.append(get_available_volume(ob, sorted_prices, price))
+        else:
+            target_list.append(get_available_volume_reversed(ob, sorted_prices, price))
     return target_list
 
-def get_available_volume(ob, sorted_prices, amount): # ob - orderbook; amount - available of qAsset;
+def get_available_volume(ob, sorted_prices, amount): # ob - orderbook; amount - available quantity of qAsset;
     volume = 0
     init = amount
     for i in sorted_prices:
         if ob[i] * i >= amount:
-            volume += amount / i
+            volume += amount / i # in fact, here 'volume =  (amount / (ob[i] * i)) * ob[i]'
+            # since we need the ratio (amount / (ob[i] * i)) of the available ob[i]
             amount = 0
             break
         volume += ob[i]
         amount -= ob[i] * i
     if amount > 0:
-        raise ValueError("There is not enough volume in orderbook!")
+        volume = 0 # Here we assume that we can not satisfy deal for 'amount' of qAsset
+        # and we would not make a deal at all - the volume changed = 0
+        # raise ValueError("There is not enough volume in orderbook!")
+    return (volume, init/volume if volume != 0 else 0)
+
+def get_available_volume_reversed(ob, sorted_prices, amount): # ob - orderbook; amount - available quantity of bAsset;
+    # Эта функция для случаев, когда работа идет с инвертироваными парами (USDT-COIN или BTC-COIN например); отмечены флагом reversed в пути
+    # При заполнении доступных ask в долларовых эквивалентах для той пары нужно на вход здесь подавать bid стакан пары
+    # А функция будет уменьшать amount на основе значений словаря стакана, а не на основе произведений ключа и значения
+    # Как в обычной функции
+    volume = 0
+    init = amount
+    for i in sorted_prices:
+        if ob[i] >= amount:
+            volume += i * amount
+            amount = 0
+            break
+        volume += i * ob[i]
+        amount -= ob[i]
+    if amount > 0:
+        volume = 0 # Here we assume that we can not satisfy deal for 'amount' of qAsset
+        # and we would not make a deal at all - the volume changed = 0
+        # raise ValueError("There is not enough volume in orderbook!")
     return (volume, init/volume if volume != 0 else 0)
 
 index_dict = {
@@ -360,14 +427,18 @@ if __name__ == '__main__':
     # tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')]
     #read_tree(root_filename, tree_name)
 
+    ref_amounts = [(1, 0), (10, 0), (100, 0), (1000, 0), (10000, 0)]#, (100000, 0), (1000000, 0), (10000000, 0)]
+
     manager = multiprocessing.Manager()
     lock = manager.Lock()
     all_pair_dict = manager.dict()
-    all_pair_dict['USDT'] = {'ask': [(1, 0), (10, 0), (100, 0), (1000, 0), (10000, 0), (100000, 0)], 'bid': [(1, 0), (10, 0), (100, 0), (1000, 0), (10000, 0), (100000, 0)]}
+    all_pair_dict['USDT'] = {'ask': ref_amounts,
+                             'bid': ref_amounts}
     # BTC_list = manager.list()
     # ETH_list = manager.list()
-    args.symbols = ['BTCUSDT', 'ETHBTC', 'ETHUSDT'] #['BTCUSDT']
-    # args.symbols = binance_writer.get_binance_symbols('symbols.pkl')[:19]
+    # args.symbols = ['USDTTRY'] #['BTCUSDT', 'ETHBTC', 'ETHUSDT'] #['BTCUSDT']
+    args.symbols = PairsPrepairer.get_obj('symbols.pkl')[:20]
+    print(args.symbols, len(args.symbols))
 
     with multiprocessing.Pool(len(args.symbols)) as pool:
         try:
@@ -379,11 +450,13 @@ if __name__ == '__main__':
                 all_pair_dict[pairName] = {}
                 root_filename = args.market + '/' + pairName + '.root'
                 tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')] # makes (for example) from 'binance/BTCUSDT.root' 'BTCUSDT'
-                if tree_name.endswith('USDT'):
+                if tree_name.__contains__('USDT'):
                     base_dict = 'USDT'
                 else:
                     base_dict = pairs[tree_name]['path'][1]
-                pool.apply_async(read_tree, args=(root_filename, tree_name, all_pair_dict, base_dict, lock))
+                inverted_pair = pairs[tree_name]['reversed'][0]
+
+                pool.apply_async(read_tree, args=(root_filename, tree_name, inverted_pair, all_pair_dict, base_dict, lock))
             pool.close()
             pool.join()
 

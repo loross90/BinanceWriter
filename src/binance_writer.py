@@ -74,9 +74,10 @@ class WSClient():
         self.orderbooks_events = {}
         self.orderbook_response = {}
         self.trees = {}
-        self.delayWatcher = list()
-        with open("delayWatcher.txt", 'w') as f:
-            f.flush()
+
+        # self.delayWatcher = list()
+        # with open("delayWatcher.txt", 'w') as f:
+        #     f.flush()
 
         self.url = kwargs.get('url')
         self.sync_list = kwargs.get('sync_list')
@@ -306,14 +307,14 @@ class WSClient():
                     self.trees[tree_name].Write()
                     self.trees[tree_name].AutoSave('SaveSelf')
                 rf.Close()
-                self.delayWatcher.insert(0, self.record_event_number)
-                self.delayWatcher.append(int(time.time_ns()/1000000))
+                # self.delayWatcher.insert(0, self.record_event_number)
+                # self.delayWatcher.append(int(time.time_ns()/1000000))
                     # time.sleep(1)
             except Exception as e:
                 print("Event in", tree_name, "can't be written", e)
 
-            with open("delayWatcher.txt", 'a') as f:
-                f.write('|'.join(str(elem) for elem in self.delayWatcher) + '\n')
+            # with open("delayWatcher.txt", 'a') as f:
+            #     f.write('|'.join(str(elem) for elem in self.delayWatcher) + '\n')
 
             # print(self.eventType, 'sync1', sync, '/', self.total_symbol_num, price, self.record_event_number, round(time.time() - global_time, 1),
             #       quantity)
@@ -577,7 +578,7 @@ class WSClient():
                             if data is None:
                                 continue
 
-                            self.delayWatcher = [data["e"], data["T"] if data["e"] == "trade" else data["E"], int(time.time_ns()/1000000)]
+                            # self.delayWatcher = [data["e"], data["T"] if data["e"] == "trade" else data["E"], int(time.time_ns()/1000000)]
                             if self.thread_to_index is None and len(self.thread_list) == len(self.sync_list):
                                 self.thread_to_index = {self.thread_list[ix]: ix for ix in range(len(self.thread_list))}
                                 self.index_to_thread = {ix: self.thread_list[ix] for ix in range(len(self.thread_list))}
@@ -680,7 +681,12 @@ def get_arguments():
                         dest='symbols',
                         help='Symbol list')
 
-    parser.add_argument('--num_of_threads', dest='num_of_threads', action="store", type=int, required=False, default=1,
+    parser.add_argument('--num_of_threads',
+                        dest='num_of_threads',
+                        action="store",
+                        type=int,
+                        required=False,
+                        default=1,
                         help="Количество используемых тредов")
 
     parser.add_argument('--num_symbol_in_request',
@@ -737,11 +743,11 @@ if __name__ == '__main__':
     params = []
     logging.info(
         "I am the parent, with PID {}".format(getpid()))
-    # binance_symbols = get_binance_symbols('symbols.pkl')  # [:40]
-    # binance_symbols = binance_symbols[:19]
-    binance_symbols = ['BTCUSDT', 'ETHBTC', 'ETHUSDT']
+
+    binance_symbols = get_binance_symbols('symbols.pkl')[:20]
+    # binance_symbols = ['USDTTRY'] #['BTCUSDT', 'ETHBTC', 'ETHUSDT']
     print(binance_symbols, len(binance_symbols))
-    #
+
     # args.num_of_threads = len(binance_symbols)
     symbols_lists = np.array_split(binance_symbols, args.num_of_threads)
 
