@@ -1,9 +1,11 @@
 import argparse
 from ROOT import TObject, TFile, TTree, AddressOf
 import array
+import asyncio
 import random
 import json
 import time
+import copy
 import os
 import numpy as np
 import multiprocessing
@@ -11,7 +13,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 import PairsPrepairer
 from prettytable import PrettyTable
 
-def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dict, lock):
+async def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dict, lock):
         rf = TFile(root_file_name, 'read')
 
         # with open("delayReader_" + tree_name + ".txt", "w") as f:
@@ -69,6 +71,8 @@ def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dict, loc
         curr_val = None
         min_diff = None
 
+        await asyncio.sleep(0)
+
         while current_orderbook_time == orderbook_timestamp[0] and current_orderbook_entry - ind > 0:
             # print("current_orderbook_time", current_orderbook_time, "orderbook_timestamp[0]",orderbook_timestamp[0])
             if curr_val is not None:
@@ -110,7 +114,7 @@ def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dict, loc
         #
         # print('action', action)
 
-        orderbook_updates_tree.Print()
+        # orderbook_updates_tree.Print()
 
         # print(orderbook)
         # last_entry = None
@@ -132,6 +136,8 @@ def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dict, loc
             updates_index -= 1
             orderbook_updates_tree.GetEntry(updates_index)
         updates_index += 1
+
+        await asyncio.sleep(0)
 
         while True:
             try:
@@ -188,6 +194,10 @@ def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dict, loc
 
                     updates_index += 1
 
+                    await asyncio.sleep(0)
+
+                await asyncio.sleep(0)
+
                 # Если больше ничего не читается (якобы синхронизировался стакан) - пишем цену в стакане
                 if printCounter == 0:
                     printCounter += 1
@@ -210,7 +220,8 @@ def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dict, loc
 
                             all_dict[tree_name] = {'ask': ask_list, 'bid': bid_list}
 
-                            print(json.dumps(all_dict[tree_name], indent=2, default=str))
+                            # print(json.dumps(all_dict[tree_name], indent=2, default=str))
+                            print(str(all_dict[tree_name]['ask']))
 
                             # print_orderbook(tree_name, orderbook[tree_name], 4) # IMPORTIANT THING
 
@@ -230,6 +241,7 @@ def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dict, loc
                 orderbook_updates_tree.Refresh()
                 orderbook_updates_tree.BuildIndex("Timestamp", "Index")
 
+                await asyncio.sleep(0)
                 # min_ask = min(orderbook['ask'].items(), key=lambda x: float(x[0]))
                 # max_bid = max(orderbook['bid'].items(), key=lambda x: float(x[0]))
                 #
@@ -356,6 +368,14 @@ def get_arguments():
                         default="BTCUSDT",
                         type=str,
                         help='symbols array')
+
+    parser.add_argument('--num_of_threads',
+                        dest='num_of_threads',
+                        action="store",
+                        type=int,
+                        required=False,
+                        default=1,
+                        help="Количество используемых тредов")
     return parser.parse_args()
 
 def fill_availables(ob, reverse_sort, base_list, inv_pair):
@@ -414,6 +434,25 @@ index_dict = {
                "cancel": "1"}
 }
 
+async def run_read_trees(loop, pairs_list, all_pairs, all_pair_dict, lock):
+    fs = []
+    for pair_name in pairs_list:
+        root_filename = 'binance' + '/' + pair_name + '.root'
+        tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind(
+            '.')]  # makes (for example) from 'binance/BTCUSDT.root' 'BTCUSDT'
+        if tree_name.__contains__('USDT'):
+            base_dict = 'USDT'
+        else:
+            base_dict = all_pairs[tree_name]['path'][1]
+        inverted_pair = all_pairs[tree_name]['reversed'][0]
+        fs.append(loop.create_task(read_tree(root_filename, tree_name, inverted_pair, all_pair_dict, base_dict, lock)))
+    await asyncio.wait(fs)
+
+def start_reading_processes(pairs_list, all_pairs, all_pair_dict, lock):
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(run_read_trees(loop, pairs_list, all_pairs, all_pair_dict, lock))
+    loop.close()
+
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
     params = []
@@ -423,10 +462,6 @@ if __name__ == '__main__':
     PairsPrepairer.pairs_prepare('https://api3.binance.com/api/v3/exchangeInfo', 'pairs.pkl', True)
     pairs = PairsPrepairer.get_obj('pairs.pkl')
 
-    # root_filename = args.market + '/' + args.symbol + '.root'
-    # tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')]
-    #read_tree(root_filename, tree_name)
-
     ref_amounts = [(1, 0), (10, 0), (100, 0), (1000, 0), (10000, 0)]#, (100000, 0), (1000000, 0), (10000000, 0)]
 
     manager = multiprocessing.Manager()
@@ -434,29 +469,25 @@ if __name__ == '__main__':
     all_pair_dict = manager.dict()
     all_pair_dict['USDT'] = {'ask': ref_amounts,
                              'bid': ref_amounts}
-    # BTC_list = manager.list()
-    # ETH_list = manager.list()
-    # args.symbols = ['USDTTRY'] #['BTCUSDT', 'ETHBTC', 'ETHUSDT'] #['BTCUSDT']
-    args.symbols = PairsPrepairer.get_obj('symbols.pkl')[:20]
-    print(args.symbols, len(args.symbols))
 
-    with multiprocessing.Pool(len(args.symbols)) as pool:
+    binance_symbols = PairsPrepairer.get_obj('symbols.pkl')[:20]
+
+    # args.symbols = binance_symbols
+    # args.num_of_threads = len(args.symbols)
+    print(binance_symbols, len(binance_symbols))
+
+    symbols_lists = np.array_split(binance_symbols, args.num_of_threads)
+
+    for list in symbols_lists:
+        list = list.tolist()
+        params.append(copy.deepcopy(args))
+        params[-1].symbols = list
+        print('params[-1]', params[-1])
+
+    with multiprocessing.Pool(len(params)) as pool:
         try:
-            # for i in range(5):
-                # BTC_list.append(0)
-                # ETH_list.append(0)
-
-            for pairName in args.symbols:
-                all_pair_dict[pairName] = {}
-                root_filename = args.market + '/' + pairName + '.root'
-                tree_name = root_filename[root_filename.rfind('/') + 1:root_filename.rfind('.')] # makes (for example) from 'binance/BTCUSDT.root' 'BTCUSDT'
-                if tree_name.__contains__('USDT'):
-                    base_dict = 'USDT'
-                else:
-                    base_dict = pairs[tree_name]['path'][1]
-                inverted_pair = pairs[tree_name]['reversed'][0]
-
-                pool.apply_async(read_tree, args=(root_filename, tree_name, inverted_pair, all_pair_dict, base_dict, lock))
+            for arg in params:
+                pool.apply_async(start_reading_processes, args=(arg.symbols, pairs, all_pair_dict, lock))
             pool.close()
             pool.join()
 

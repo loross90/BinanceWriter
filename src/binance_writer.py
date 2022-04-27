@@ -748,7 +748,7 @@ if __name__ == '__main__':
     # binance_symbols = ['USDTTRY'] #['BTCUSDT', 'ETHBTC', 'ETHUSDT']
     print(binance_symbols, len(binance_symbols))
 
-    # args.num_of_threads = len(binance_symbols)
+    # args.num_of_threads = 50 # len(binance_symbols)
     symbols_lists = np.array_split(binance_symbols, args.num_of_threads)
 
     for list in symbols_lists:
