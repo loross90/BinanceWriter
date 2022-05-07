@@ -60,6 +60,13 @@ async def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dic
 
         orderbook_updates_tree.BuildIndex("Timestamp", "Index")
 
+        # receive = array.array('i', [0])
+        # write = array.array('i', [0])
+        # event_timestamps = rf.Get(tree_name + '_timestamp')
+        # event_timestamps.SetBranchAddress('Receive', receive)
+        # event_timestamps.SetBranchAddress('Write', write)
+
+
         ind = 0
         orderbook = {}
         # USDT_list = [1.0, 10.0, 100.0, 1000.0, 10000.0]
@@ -136,6 +143,7 @@ async def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dic
             updates_index -= 1
             orderbook_updates_tree.GetEntry(updates_index)
         updates_index += 1
+        printCounter = 0
 
         await asyncio.sleep(0)
 
@@ -205,23 +213,34 @@ async def read_tree(root_file_name, tree_name, inverted_pair, all_dict, base_dic
                         try:
                             min_ask = min(orderbook[tree_name]['ask'].items(), key=lambda x: float(x[0]))
                             max_bid = max(orderbook[tree_name]['bid'].items(), key=lambda x: float(x[0]))
-                            print('sync1', tree_name, (float(min_ask[0]) + float(max_bid[0])) / 2.) #current_orderbook_time - тоже писать надо потом
 
                             if not inverted_pair:
-                                ask_list = fill_availables(orderbook[tree_name]['ask'], False,
-                                                           (i[0] for i in all_dict[base_dict]['ask']), inverted_pair) #False for ask and True for bid; it affects sort method for keys in orderbook
-                                bid_list = fill_availables(orderbook[tree_name]['bid'], True,
-                                                           (i[0] for i in all_dict[base_dict]['bid']), inverted_pair)
+                                ask_list = fill_availables(orderbook[tree_name]['ask'],
+                                                           'ask',
+                                                           False,
+                                                           (i[0] for i in all_dict[base_dict]['ask']),
+                                                           inverted_pair) #False for ask and True for bid; it affects sort method for keys in orderbook
+                                bid_list = fill_availables(orderbook[tree_name]['bid'],
+                                                           'bid',
+                                                           True,
+                                                           (i[0] for i in all_dict[base_dict]['bid']),
+                                                           inverted_pair)
                             else:
-                                ask_list = fill_availables(orderbook[tree_name]['bid'], True,
-                                                           (i[0] for i in all_dict[base_dict]['bid']), inverted_pair)
-                                bid_list = fill_availables(orderbook[tree_name]['ask'], False,
-                                                           (i[0] for i in all_dict[base_dict]['ask']), inverted_pair)
+                                ask_list = fill_availables(orderbook[tree_name]['bid'],
+                                                           'bid',
+                                                           True,
+                                                           (i[0] for i in all_dict[base_dict]['bid']),
+                                                           inverted_pair)
+                                bid_list = fill_availables(orderbook[tree_name]['ask'],
+                                                           'ask',
+                                                           False,
+                                                           (i[0] for i in all_dict[base_dict]['ask']),
+                                                           inverted_pair)
 
                             all_dict[tree_name] = {'ask': ask_list, 'bid': bid_list}
 
                             # print(json.dumps(all_dict[tree_name], indent=2, default=str))
-                            print(str(all_dict[tree_name]['ask']))
+                            print('sync1', tree_name, (float(min_ask[0]) + float(max_bid[0])) / 2., str(all_dict[tree_name]['ask']), '\n')  # current_orderbook_time - тоже писать надо потом
 
                             # print_orderbook(tree_name, orderbook[tree_name], 4) # IMPORTIANT THING
 
@@ -378,34 +397,67 @@ def get_arguments():
                         help="Количество используемых тредов")
     return parser.parse_args()
 
-def fill_availables(ob, reverse_sort, base_list, inv_pair):
+def fill_availables(ob, ob_part, reverse_sort, base_list, inv_pair):
+    """
+    Used to count amount of coins available to buy.
+    @param ob: Orderbook
+    @param ob_part: ask or bid
+    @param reverse_sort: Type of sort aplied to orderbook; reversed for bid, straight for ask
+    @param base_list: List with available amount of coins of base pair.
+    @param inv_pair: Pair is reversed or not. f.e.: BTCUSDT is not reversed, but USDTVAL is reversed
+    @return: List of tuples, each corresponding to amount of $, given in 'ref_amounts'
+    """
     target_list = []
+    fee = 0.001 # Later fee needed to be calculated properly
     sorted_prices = sorted(ob, reverse=reverse_sort)
     for price in base_list:
         if not inv_pair:
-            target_list.append(get_available_volume(ob, sorted_prices, price))
-        else:
-            target_list.append(get_available_volume_reversed(ob, sorted_prices, price))
+            if ob_part == 'ask':
+                target_list.append(get_available_volume_ask(ob, sorted_prices, price, fee))
+            if ob_part == 'bid':
+                target_list.append(get_available_volume_bid(ob, sorted_prices, price, fee))
+        if inv_pair:
+            if ob_part == 'ask':
+                target_list.append(get_available_volume_bid_r(ob, sorted_prices, price, fee))
+            if ob_part == 'bid':
+                target_list.append(get_available_volume_ask_r(ob, sorted_prices, price, fee))
     return target_list
 
-def get_available_volume(ob, sorted_prices, amount): # ob - orderbook; amount - available quantity of qAsset;
+def get_available_volume_ask(ob, sorted_prices, amount, fee_rate): # ob - orderbook; amount - available quantity of qAsset; fee_rate - in r.u., not in percents
     volume = 0
     init = amount
     for i in sorted_prices:
-        if ob[i] * i >= amount:
-            volume += amount / i # in fact, here 'volume =  (amount / (ob[i] * i)) * ob[i]'
-            # since we need the ratio (amount / (ob[i] * i)) of the available ob[i]
+        if ob[i] * i >= amount * (1 - fee_rate):
+            volume += amount * (1 - fee_rate) / i # in fact, here 'volume =  (amount / (ob[i] * i)) * ob[i]'
+            # since we need the fraction (amount / (ob[i] * i)) of the available ob[i]
             amount = 0
             break
         volume += ob[i]
-        amount -= ob[i] * i
+        amount -= ob[i] * i / (1 - fee_rate)
     if amount > 0:
         volume = 0 # Here we assume that we can not satisfy deal for 'amount' of qAsset
         # and we would not make a deal at all - the volume changed = 0
         # raise ValueError("There is not enough volume in orderbook!")
     return (volume, init/volume if volume != 0 else 0)
 
-def get_available_volume_reversed(ob, sorted_prices, amount): # ob - orderbook; amount - available quantity of bAsset;
+def get_available_volume_bid(ob, sorted_prices, amount, fee_rate):
+    volume = 0
+    init = amount
+    for i in sorted_prices:
+        if ob[i] * i * (1 - fee_rate) >= amount:
+            volume += amount / ((1 - fee_rate) * i)  # in fact, here 'volume =  (amount / (ob[i] * i)) * ob[i]'
+            # since we need the fraction (amount / (ob[i] * i)) of the available ob[i]
+            amount = 0
+            break
+        volume += ob[i]
+        amount -= ob[i] * i * (1 - fee_rate)
+    if amount > 0:
+        volume = 0  # Here we assume that we can not satisfy deal for 'amount' of qAsset
+        # and we would not make a deal at all - the volume changed = 0
+        # raise ValueError("There is not enough volume in orderbook!")
+    return (volume, init / volume if volume != 0 else 0)
+
+def get_available_volume_ask_r(ob, sorted_prices, amount, fee_rate): # ob - orderbook; amount - available quantity of bAsset;
     # Эта функция для случаев, когда работа идет с инвертироваными парами (USDT-COIN или BTC-COIN например); отмечены флагом reversed в пути
     # При заполнении доступных ask в долларовых эквивалентах для той пары нужно на вход здесь подавать bid стакан пары
     # А функция будет уменьшать amount на основе значений словаря стакана, а не на основе произведений ключа и значения
@@ -414,16 +466,50 @@ def get_available_volume_reversed(ob, sorted_prices, amount): # ob - orderbook; 
     init = amount
     for i in sorted_prices:
         if ob[i] >= amount:
-            volume += i * amount
+            volume += i * amount / (1 - fee_rate)
             amount = 0
             break
-        volume += i * ob[i]
+        volume += i * ob[i] / (1 - fee_rate)
         amount -= ob[i]
     if amount > 0:
         volume = 0 # Here we assume that we can not satisfy deal for 'amount' of qAsset
         # and we would not make a deal at all - the volume changed = 0
         # raise ValueError("There is not enough volume in orderbook!")
     return (volume, init/volume if volume != 0 else 0)
+
+def get_available_volume_bid_r(ob, sorted_prices, amount, fee_rate):# ob - orderbook; amount - available quantity of bAsset;
+    # Эта функция для случаев, когда работа идет с инвертироваными парами (USDT-COIN или BTC-COIN например); отмечены флагом reversed в пути
+    # При заполнении доступных ask в долларовых эквивалентах для той пары нужно на вход здесь подавать bid стакан пары
+    # А функция будет уменьшать amount на основе значений словаря стакана, а не на основе произведений ключа и значения
+    # Как в обычной функции
+    volume = 0
+    init = amount
+    for i in sorted_prices:
+        if ob[i] >= amount:
+            volume += i * amount * (1 - fee_rate)
+            amount = 0
+            break
+        volume += i * ob[i] * (1 - fee_rate)
+        amount -= ob[i]
+    if amount > 0:
+        volume = 0 # Here we assume that we can not satisfy deal for 'amount' of qAsset
+        # and we would not make a deal at all - the volume changed = 0
+        # raise ValueError("There is not enough volume in orderbook!")
+    return (volume, init/volume if volume != 0 else 0)
+
+
+def fee_rate_calculator(turnover, balance, base_symbol, trade_type):
+
+    return fee_reduce_multiplier(base_symbol) * 0.001
+
+def fee_reduce_multiplier(base_symbol):
+    if base_symbol in fee_discounts:
+        return (1 - fee_discounts[base_symbol])
+    return 1
+
+fee_discounts = {
+    'BNB' : 0.25
+}
 
 index_dict = {
     "type": {"order": "0",
@@ -462,7 +548,7 @@ if __name__ == '__main__':
     PairsPrepairer.pairs_prepare('https://api3.binance.com/api/v3/exchangeInfo', 'pairs.pkl', True)
     pairs = PairsPrepairer.get_obj('pairs.pkl')
 
-    ref_amounts = [(1, 0), (10, 0), (100, 0), (1000, 0), (10000, 0)]#, (100000, 0), (1000000, 0), (10000000, 0)]
+    ref_amounts = [(1, 0), (10, 0), (100, 0), (1000, 0), (10000, 0), (100000, 0)]#, (100000, 0), (1000000, 0), (10000000, 0)]
 
     manager = multiprocessing.Manager()
     lock = manager.Lock()
@@ -471,6 +557,7 @@ if __name__ == '__main__':
                              'bid': ref_amounts}
 
     binance_symbols = PairsPrepairer.get_obj('symbols.pkl')[:20]
+    # binance_symbols = ['BTCUSDT']
 
     # args.symbols = binance_symbols
     # args.num_of_threads = len(args.symbols)

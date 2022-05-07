@@ -6,6 +6,10 @@ import os
 from igraph import *
 import pickle
 
+
+def cut_timestamp(ts, fwcut_symbols):
+    return int(str(ts)[fwcut_symbols:])
+
 def get_obj(path_to_file):
     if os.path.exists(path_to_file):
         with open(path_to_file, 'rb') as f:
@@ -13,11 +17,9 @@ def get_obj(path_to_file):
     else:
         raise ValueError("No file found!")
 
-
 def save_obj(obj, path_to_file):
     with open(path_to_file, 'wb') as f:
         pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
-
 
 def make_get_request(address):
     return json.loads(requests.get(address).text)

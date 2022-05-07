@@ -301,11 +301,18 @@ class WSClient():
                 for el in self.sync_list:
                     sync += el
                 root_filename = self.market_name + '/' + tree_name + '.root'
+                ts_filename = self.market_name + '/' + tstree + '.root'
                 rf = TFile(root_filename, 'update')
                 if rf.IsOpen and not rf.IsZombie():
                     # self.trees[tree_name].Write("", TObject.kOverwrite)
                     self.trees[tree_name].Write()
                     self.trees[tree_name].AutoSave('SaveSelf')
+                rf.Close()
+                rf = TFile(ts_filename, 'update')
+                if rf.IsOpen and not rf.IsZombie():
+                    # self.trees[tree_name].Write("", TObject.kOverwrite)
+                    self.trees[tstree].Write()
+                    self.trees[tstree].AutoSave('SaveSelf')
                 rf.Close()
                 # self.delayWatcher.insert(0, self.record_event_number)
                 # self.delayWatcher.append(int(time.time_ns()/1000000))
@@ -427,8 +434,7 @@ class WSClient():
                 for price, quantity in self.orderbook_response[symbol][side]:
                     price = float(price)
                     quantity = float(quantity)
-                    self.orderbooks_events[symbol]['timestamp'][0] = int(
-                        self.orderbook_response[symbol]['lastUpdateId'] / 1000)
+                    self.orderbooks_events[symbol]['timestamp'][0] = self.cut_timestamp(self.orderbook_response[symbol]['lastUpdateId'], 3)
                     # self.orderbooks_events[symbol]['timestamp'][0] = int(time.time()) #timestamp = int(data["T"] / 1000)  # convert to seconds
                     self.orderbooks_events[symbol]['price'][0] = price
                     self.orderbooks_events[symbol]['volume'][0] = quantity
@@ -497,7 +503,7 @@ class WSClient():
                             price = float(price)
                             quantity = float(quantity)
 
-                            self.orderbooks_events[symbol]['timestamp'][0] = int(data["E"] / 1000)  # convert to seconds
+                            self.orderbooks_events[symbol]['timestamp'][0] = self.cut_timestamp(data["E"], 3) # convert to seconds
                             self.orderbooks_events[symbol]['price'][0] = price
                             self.orderbooks_events[symbol]['volume'][0] = quantity
                             self.orderbooks_events[symbol]['side'][0] = False if side == "asks" else True
@@ -572,6 +578,7 @@ class WSClient():
                             data = None
                             try:
                                 data = json.loads(reply)['data']
+                                self.receiveTime = self.cut_timestamp(int(time.time_ns() / 1000000), 3)
                                 # print(data)
                             except BufferError:
                                 logger.debug('Cant convert to json string {}'.format(reply))
@@ -745,7 +752,7 @@ if __name__ == '__main__':
         "I am the parent, with PID {}".format(getpid()))
 
     binance_symbols = get_binance_symbols('symbols.pkl')[:20]
-    # binance_symbols = ['USDTTRY'] #['BTCUSDT', 'ETHBTC', 'ETHUSDT']
+    # binance_symbols = ['BTCUSDT'] #['BTCUSDT', 'ETHBTC', 'ETHUSDT']
     print(binance_symbols, len(binance_symbols))
 
     # args.num_of_threads = 50 # len(binance_symbols)
