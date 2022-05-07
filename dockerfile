@@ -19,7 +19,6 @@ WORKDIR /usr/local/ROOT_CERN
 
 #Download ROOT from CERN git-repo into /usr/local/ROOT_CERN/root_src
 RUN git clone --branch latest-stable https://github.com/root-project/root.git root_src
-RUN ls
 
 #Install and build ROOT_CERN
 RUN mkdir root_build root_install

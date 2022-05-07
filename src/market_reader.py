@@ -2,6 +2,7 @@ import argparse
 
 from ROOT import TObject, TFile, TTree, AddressOf
 import array
+from datetime import datetime
 import random
 import time
 import os
@@ -32,6 +33,9 @@ def read_tree(root_file_name, tree_name):
         for i in range(last_entry, current_entry):
             rf.Get(tree_name).GetEntry(i)
             print(tree_name, 'i', i, price[0], volume[0], timestamp[0], index[0])
+            with open("reader_price.txt", "a") as fw:
+                fw.write(str(i) + " " + str(price[0]) + "\n")
+
 
         last_entry = current_entry
         rf.Get(tree_name).Refresh()
