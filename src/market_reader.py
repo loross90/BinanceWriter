@@ -36,7 +36,6 @@ def read_tree(root_file_name, tree_name):
             with open("reader_price.txt", "a") as fw:
                 fw.write(str(i) + " " + str(price[0]) + "\n")
 
-
         last_entry = current_entry
         rf.Get(tree_name).Refresh()
 

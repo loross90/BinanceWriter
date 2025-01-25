@@ -23,6 +23,7 @@ import os
 from os import getpid
 from ROOT import TObject, TFile, TTree, AddressOf
 import pickle
+import tzlocal 
 
 def get_obj(path_to_file):
     with open(path_to_file, 'rb') as f:
@@ -320,7 +321,7 @@ class WSClient():
             #       quantity)
 
     def write_events(self, data):
-
+        # print("write_events", data)
         tree_name = data["s"]
         event_type = data["e"]
         self.eventType = event_type
@@ -449,6 +450,7 @@ class WSClient():
                 self.sync_orderbooks[symbol] = (False, 0)
 
     async def update_orderbook(self, data):
+        # print('update_orderbook', data)
         if data['e'] == "depthUpdate":
             symbol = data["s"]
             if not self.sync_orderbooks[symbol][0]:
@@ -572,7 +574,11 @@ class WSClient():
                             data = None
                             try:
                                 data = json.loads(reply)['data']
-                                # print(data)
+                                local_timezone = tzlocal.get_localzone()  # get pytz timezone
+                                local_time = datetime.fromtimestamp(data['E']/1000, local_timezone).strftime("%H:%M:%S %d-%m-%Y")
+                                print('raw data', data, local_time)
+                                # print(local_time.strftime("%Y-%m-%d %H:%M:%S.%f%z (%Z)"))
+                                
                             except BufferError:
                                 logger.debug('Cant convert to json string {}'.format(reply))
                             if data is None:
@@ -582,7 +588,6 @@ class WSClient():
                             if self.thread_to_index is None and len(self.thread_list) == len(self.sync_list):
                                 self.thread_to_index = {self.thread_list[ix]: ix for ix in range(len(self.thread_list))}
                                 self.index_to_thread = {ix: self.thread_list[ix] for ix in range(len(self.thread_list))}
-
                             self.write_events(data)
 
                             await self.update_orderbook(data)
@@ -744,8 +749,11 @@ if __name__ == '__main__':
     logging.info(
         "I am the parent, with PID {}".format(getpid()))
 
-    binance_symbols = get_binance_symbols('symbols.pkl')[:20]
+    # binance_symbols = get_binance_symbols('symbols.pkl')[:20]
+    # binance_symbols = get_binance_symbols('symbols.pkl')[:200]
     # binance_symbols = ['USDTTRY'] #['BTCUSDT', 'ETHBTC', 'ETHUSDT']
+    # binance_symbols = ['BTCUSDT', 'ETHBTC', 'ETHUSDT']
+    binance_symbols = ['BTCUSDT']
     print(binance_symbols, len(binance_symbols))
 
     # args.num_of_threads = len(binance_symbols)
@@ -757,7 +765,7 @@ if __name__ == '__main__':
         params[-1].symbols = list
 
         if args.url == "wss://stream.binance.com:9443/stream?streams=":
-            market_name = 'binance'
+            market_name = '../binance'
         else:
             market_name = 'market_data'
         if not os.path.exists(market_name):
@@ -778,8 +786,6 @@ if __name__ == '__main__':
 
     print("thread_list ", thread_list)
 
-
-
     for i in range(args.num_of_threads):
         sync_list.append(0)
         requests_list.append(0)
@@ -789,7 +795,8 @@ if __name__ == '__main__':
             # pool.apply_async(show_sync, args=(sync_list, requests_list, thread_list))
             for arg in params:
                 res = pool.apply_async(listen_socket, args=(
-                arg, sync_list, requests_list, thread_list, lock_time, last_request_timestamp, lock, was_lock))
+                    arg, sync_list, requests_list, thread_list, lock_time,
+                    last_request_timestamp, lock, was_lock))
                 # print('res', res.get(timeout=10))
 
             pool.close()

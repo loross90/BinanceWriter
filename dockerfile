@@ -7,7 +7,10 @@ RUN echo "tzdata tzdata/Areas select Europe" > /tmp/preseed.txt; \
     debconf-set-selections /tmp/preseed.txt && \
     apt-get update && \
     apt-get install -y tzdata
-
+    
+RUN apt-get -y install sudo
+RUN echo 'debconf debconf/frontend select Noninteractive' | sudo debconf-set-selections && \
+    sudo apt-get install -y -q
 # Install apt and other packages
 RUN apt-get -y install sudo && \
     sudo apt-get -y install cmake && \
